@@ -195,14 +195,14 @@ static int fd_to_mem_fd(const int infd, FEXEF *flags) {
     const int e = errno;
     if ((_weaken(munmap)(space, st.st_size) != -1) && success) {
       if (*flags & (FEXEF_ZIP | FEXEF_APE)) {
-        // The dup isn't strickly required, don't fail if it does
+        // The dup isn't strictly required, don't fail if it does
         const int highfd = fcntl(fd, F_DUPFD, 9001);
         if (highfd != -1) {
           close(fd);
           fd = highfd;
         }
       } else if (!IsAarch64() || !IsQemuUser()) {
-        // setting cloexec isn't trickly required, don't fail if it does
+        // setting cloexec isn't strictly required, don't fail if it does
         int flags = fcntl(fd, F_GETFD);
         if (flags != -1) {
           fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
@@ -262,7 +262,9 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
         int fl_flags;
         BLOCK_SIGNALS;
         BLOCK_CANCELATION;
+        strace_enabled(-1);
         fl_flags = fcntl(newfd, F_GETFL);
+        strace_enabled(+1);
         ALLOW_CANCELATION;
         ALLOW_SIGNALS;
         if (fl_flags == -1) {
@@ -302,6 +304,13 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
           ALLOW_CANCELATION;
           ALLOW_SIGNALS;
           fflags |= (int)isAPE << 1;
+          if (fd_flags & FD_CLOEXEC) {
+            if (isAPE) {
+              STRACE("warning: APE fd (%d) has FD_CLOEXEC set, APE loading likely not possible", newfd);
+            } else if (IsAarch64() && IsQemuUser()) {
+              STRACE("warning: fd (%d) has FD_CLOEXEC set, qemu user loading likely not possible", newfd);
+            }
+          }
         }
       }
       if (fflags & FEXEF_ZIP) {
@@ -316,13 +325,11 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
         envp = envs;
       }
       fexecve_impl(newfd, argv, envp);
-      if (fflags & FEXEF_APE) {
-        char path[14 + 12];
-        FormatInt32(stpcpy(path, "/dev/fd/"), newfd);
-        STRACE("execve(%#s, %s) due to %s", path, DescribeStringList(argv),
-               _strerrno(errno));
-        sys_execve(path, argv, envp);
-      }
+      char path[14 + 12];
+      FormatInt32(stpcpy(path, "/dev/fd/"), newfd);
+      STRACE("execve(%#s, %s) due to %s", path, DescribeStringList(argv),
+             _strerrno(errno));
+      sys_execve(path, argv, envp);
     } while (0);
     if (newfd != fd) {
       int keepErrno = errno;

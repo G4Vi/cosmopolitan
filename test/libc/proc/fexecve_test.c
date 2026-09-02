@@ -152,17 +152,6 @@ TEST(fexecve, APE) {
   EXITS(42);
 }
 
-// TODO(G4Vi): This test will need to change, APE's cannot run with O_CLOEXEC right now
-/*TEST(fexecve, APE_cloexec) {
-  if (!o_cloexec) return;
-  testlib_extract("/zip/life-nozip", "life-nozip", 0555);
-  SPAWN(vfork);
-  int fd = open("life-nozip", O_RDONLY | O_CLOEXEC);
-  ASSERT_NE(-1, fd);
-  fexecve(fd, (char *const[]){0}, (char *const[]){0});
-  EXITS(42);
-}*/
-
 TEST(fexecve, APEwithZipos) {
   testlib_extract("/zip/zipread", "zipread", 0555);
   SPAWN(vfork);
