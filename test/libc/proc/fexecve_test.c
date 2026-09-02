@@ -146,7 +146,7 @@ TEST(fexecve, memfd_create) {
 
 TEST(fexecve, APE) {
   testlib_extract("/zip/life-nozip", "life-nozip", 0555);
-  SPAWN(fork);
+  SPAWN(vfork);
   int fd = open("life-nozip", O_RDONLY);
   ASSERT_NE(-1, fd);
   fexecve(fd, (char *const[]){0}, (char *const[]){0});
@@ -157,7 +157,7 @@ TEST(fexecve, APE) {
 TEST(fexecve, APE_cloexec) {
   if (!o_cloexec) return;
   testlib_extract("/zip/life-nozip", "life-nozip", 0555);
-  SPAWN(fork);
+  SPAWN(vfork);
   int fd = open("life-nozip", O_RDONLY | O_CLOEXEC);
   ASSERT_NE(-1, fd);
   fexecve(fd, (char *const[]){0}, (char *const[]){0});
@@ -166,7 +166,7 @@ TEST(fexecve, APE_cloexec) {
 
 TEST(fexecve, APEwithZipos) {
   testlib_extract("/zip/zipread", "zipread", 0555);
-  SPAWN(fork);
+  SPAWN(vfork);
   int fd = open("zipread", O_RDONLY);
   ASSERT_NE(-1, fd);
   fexecve(fd, (char *const[]){0}, (char *const[]){0});
@@ -175,7 +175,7 @@ TEST(fexecve, APEwithZipos) {
 
 TEST(fexecve, ziposELF) {
   if (!SupportsMemfdCreate) return;
-  int fd = open("/zip/life-nozip.elf", O_RDONLY | o_cloexec);
+  int fd = open("/zip/life-nozip.elf", O_RDONLY);
   ASSERT_NE(-1, fd);
   SPAWN(fork);
   fexecve(fd, (char *const[]){0}, (char *const[]){0});

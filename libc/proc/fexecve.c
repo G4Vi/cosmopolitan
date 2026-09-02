@@ -97,22 +97,20 @@ static inline int isZipFile(const void *data, size_t data_size) {
 }
 
 static int isFdAZipFile(const int fd) {
-  if (!_weaken(mmap) || !_weaken(munmap) || !_weaken(GetZipEocd)) {
+  if (!_weaken(GetZipEocd)) {
     return enosys();
-  } else if(__vforked) {
-    return enotsup();
   }
 
   struct stat st;
   if (fstat(fd, &st) == -1) {
     return -1;
   }
-  void *space = _weaken(mmap)(0, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
+  void *space = __sys_mmap(0, st.st_size, PROT_READ, MAP_SHARED, fd, 0, 0);
   if (space == MAP_FAILED) {
     return -1;
   }
   int rc = isZipFile(space, st.st_size);
-  if(_weaken(munmap)(space, st.st_size) == -1) {
+  if(__sys_munmap(space, st.st_size) == -1) {
     return -1;
   }
   return rc;
@@ -240,7 +238,7 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
           break;
         }
         bool execute_only = IsLinux() && flags & _O_PATH;
-        if (!execute_only && !__vforked) {
+        if (!execute_only) {
           int isFdAZipFileRc;
           BLOCK_SIGNALS;
           BLOCK_CANCELATION;
@@ -253,14 +251,14 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
             break;
           }
           fflags = isFdAZipFileRc << 0;
+          bool isAPE;
+          BLOCK_SIGNALS;
+          BLOCK_CANCELATION;
+          isAPE = IsAPEFd(newfd);
+          ALLOW_CANCELATION;
+          ALLOW_SIGNALS;
+          fflags |= (int)isAPE << 1;
         }
-        bool isAPE;
-        BLOCK_SIGNALS;
-        BLOCK_CANCELATION;
-        isAPE = IsAPEFd(newfd);
-        ALLOW_CANCELATION;
-        ALLOW_SIGNALS;
-        fflags |= (int)isAPE << 1;
       }
       if (fflags || (IsAarch64() && IsQemuUser())) {
         int flags;
