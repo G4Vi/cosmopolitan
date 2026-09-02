@@ -139,7 +139,23 @@ static inline int getFexeFlags(const void *data, size_t data_size) {
 /**
  * Creates a memfd and copies fd to it.
  *
- * This does an inplace conversion of APE to ELF when detected!!!!
+ * If file is a zip file or ape file, FD_CLOEXEC is NOT set, however the file
+ * descriptor number will be over 9000 to keep it out of the way of the new
+ * process. If the file is not a zip file and not a ape file, FD_CLOEXEC will be
+ * set unless executing under aarch64 QEMU user. These transformations are
+ * applied to make executing from zipos work as expected, avoid leaking file
+ * descriptors when possible, but when not possible, avoid conflicts with
+ * programs that assume file descriptor numbers are available.
+ *
+ * FD_CLOEXEC is always set on zipos file descriptors, however, FD_CLOEXEC
+ * makes the program inaccessible to the APE loader as when the APE loader
+ * starts, the fd descriptor is closed. Additionally, closing the file
+ * descriptor prevents it from being usable in COSMOPOLITAN_INIT_ZIPOS=,
+ * preventing working zipos in the newly executed. Therefore, FD_CLOEXEC cannot
+ * be set on APEs or zip files. Likewise with the APE loader, FD_CLOEXEC
+ * prevents the qemu aarch64 user interpreter from accessing the ELF, so we
+ * don't set it then either.
+ *
  */
 static int fd_to_mem_fd(const int infd, FEXEF *flags) {
   if ((!IsLinux() && !IsFreebsd()) || !_weaken(mmap) || !_weaken(munmap)) {
@@ -154,7 +170,7 @@ static int fd_to_mem_fd(const int infd, FEXEF *flags) {
   }
   int fd;
   if (IsLinux()) {
-    fd = sys_memfd_create(__func__, MFD_CLOEXEC);
+    fd = sys_memfd_create(__func__, 0);
   } else if (IsFreebsd()) {
     fd = sys_shm_open(SHM_ANON, O_CREAT | O_RDWR, 0);
   } else {
@@ -177,6 +193,20 @@ static int fd_to_mem_fd(const int infd, FEXEF *flags) {
     }
     const int e = errno;
     if ((_weaken(munmap)(space, st.st_size) != -1) && success) {
+      if (*flags & (FEXEF_ZIP | FEXEF_APE)) {
+        // The dup isn't strickly required, don't fail if it does
+        const int highfd = fcntl(fd, F_DUPFD, 9001);
+        if (highfd != -1) {
+          close(fd);
+          fd = highfd;
+        }
+      } else if (!IsAarch64() || !IsQemuUser()) {
+        // setting cloexec isn't trickly required, don't fail if it does
+        int flags = fcntl(fd, F_GETFD);
+        if (flags != -1) {
+          fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+        }
+      }
       unassert(readRc == st.st_size);
       return fd;
     } else if (!success) {
@@ -228,16 +258,16 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
           break;
         }
       } else {
-        int flags;
+        int fl_flags;
         BLOCK_SIGNALS;
         BLOCK_CANCELATION;
-        flags = fcntl(newfd, F_GETFL);
+        fl_flags = fcntl(newfd, F_GETFL);
         ALLOW_CANCELATION;
         ALLOW_SIGNALS;
-        if (flags == -1) {
+        if (fl_flags == -1) {
           break;
         }
-        bool execute_only = IsLinux() && flags & _O_PATH;
+        bool execute_only = IsLinux() && fl_flags & _O_PATH;
         if (!execute_only) {
           int isFdAZipFileRc;
           BLOCK_SIGNALS;
@@ -260,30 +290,16 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
           fflags |= (int)isAPE << 1;
         }
       }
-      if (fflags || (IsAarch64() && IsQemuUser())) {
-        int flags;
-        BLOCK_SIGNALS;
-        BLOCK_CANCELATION;
-        flags = fcntl(newfd, F_GETFD);
-        if (flags != -1) {
-          flags = fcntl(newfd, F_SETFD, flags & (~FD_CLOEXEC));
-        }
-        ALLOW_CANCELATION;
-        ALLOW_SIGNALS;
-        if (flags == -1) {
-          break;
-        }
-        BLOCK_SIGNALS;
-        BLOCK_CANCELATION;
-        const int highfd = fcntl(newfd, F_DUPFD, 9001);
-        if (highfd != -1) {
-          close(newfd);
-          newfd = highfd;
-        }
-        ALLOW_CANCELATION;
-        ALLOW_SIGNALS;
+      int fd_flags;
+      BLOCK_SIGNALS;
+      BLOCK_CANCELATION;
+      fd_flags = fcntl(newfd, F_GETFD);
+      ALLOW_CANCELATION;
+      ALLOW_SIGNALS;
+      if (fd_flags == -1) {
+        break;
       }
-      if (fflags & FEXEF_ZIP) {
+      if (fflags & FEXEF_ZIP && (fd_flags & FD_CLOEXEC) == 0) {
         char *path = alloca(PATH_MAX);
         FormatInt32(stpcpy(path, "COSMOPOLITAN_INIT_ZIPOS="), newfd);
         size_t numenvs;
