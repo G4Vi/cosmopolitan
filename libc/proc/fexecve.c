@@ -28,6 +28,7 @@
 #include "libc/dce.h"
 #include "libc/errno.h"
 #include "libc/fmt/itoa.h"
+#include "libc/fmt/magnumstrs.internal.h"
 #include "libc/intrin/describeflags.h"
 #include "libc/intrin/kprintf.h"
 #include "libc/intrin/safemacros.h"
@@ -269,18 +270,31 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
         }
         bool execute_only = IsLinux() && fl_flags & _O_PATH;
         if (!execute_only) {
-          int isFdAZipFileRc;
+          int fd_flags;
           BLOCK_SIGNALS;
           BLOCK_CANCELATION;
           strace_enabled(-1);
-          isFdAZipFileRc = isFdAZipFile(newfd);
+          fd_flags = fcntl(newfd, F_GETFD);
           strace_enabled(+1);
           ALLOW_CANCELATION;
           ALLOW_SIGNALS;
-          if (isFdAZipFileRc == -1) {
+          if (fd_flags == -1) {
             break;
           }
-          fflags = isFdAZipFileRc << 0;
+          if ((fd_flags & FD_CLOEXEC) == 0) {
+            int isFdAZipFileRc;
+            BLOCK_SIGNALS;
+            BLOCK_CANCELATION;
+            strace_enabled(-1);
+            isFdAZipFileRc = isFdAZipFile(newfd);
+            strace_enabled(+1);
+            ALLOW_CANCELATION;
+            ALLOW_SIGNALS;
+            if (isFdAZipFileRc == -1) {
+              break;
+            }
+            fflags = isFdAZipFileRc << 0;
+          }
           bool isAPE;
           BLOCK_SIGNALS;
           BLOCK_CANCELATION;
@@ -290,16 +304,7 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
           fflags |= (int)isAPE << 1;
         }
       }
-      int fd_flags;
-      BLOCK_SIGNALS;
-      BLOCK_CANCELATION;
-      fd_flags = fcntl(newfd, F_GETFD);
-      ALLOW_CANCELATION;
-      ALLOW_SIGNALS;
-      if (fd_flags == -1) {
-        break;
-      }
-      if (fflags & FEXEF_ZIP && (fd_flags & FD_CLOEXEC) == 0) {
+      if (fflags & FEXEF_ZIP) {
         char *path = alloca(PATH_MAX);
         FormatInt32(stpcpy(path, "COSMOPOLITAN_INIT_ZIPOS="), newfd);
         size_t numenvs;
@@ -310,13 +315,14 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
         envs[numenvs + 1] = NULL;
         envp = envs;
       }
+      fexecve_impl(newfd, argv, envp);
       if (fflags & FEXEF_APE) {
         char path[14 + 12];
         FormatInt32(stpcpy(path, "/dev/fd/"), newfd);
+        STRACE("execve(%#s, %s) due to %s", path, DescribeStringList(argv),
+               _strerrno(errno));
         sys_execve(path, argv, envp);
-        break;
       }
-      fexecve_impl(newfd, argv, envp);
     } while (0);
     if (newfd != fd) {
       int keepErrno = errno;

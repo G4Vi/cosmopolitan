@@ -76,8 +76,8 @@ TEST(fexecve, elf) {
   EXITS(42);
 }
 
-// With a file on disk is fexecve'd the path is still unable to `open` zipos so
-// COSMOPOLITAN_INIT_ZIPOS= is not needed.
+// With a file on disk is fexecve'd the path is still available to `open` zipos
+// so COSMOPOLITAN_INIT_ZIPOS= is not needed.
 TEST(fexecve, elfWithZipos) {
   int extracted_mode = 0555;
   int open_flags = O_RDONLY | o_cloexec;
