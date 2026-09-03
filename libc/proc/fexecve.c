@@ -201,13 +201,9 @@ static int fd_to_mem_fd(const int infd, FEXEF *flags) {
 
 static int getFdFexeFlags(const int fd) {
   int fl_flags;
-  BLOCK_SIGNALS;
-  BLOCK_CANCELATION;
   strace_enabled(-1);
   fl_flags = fcntl(fd, F_GETFL);
   strace_enabled(+1);
-  ALLOW_CANCELATION;
-  ALLOW_SIGNALS;
   if (fl_flags == -1) {
     return -1;
   }
@@ -217,13 +213,9 @@ static int getFdFexeFlags(const int fd) {
   }
   FEXEF fflags = 0;
   int fd_flags;
-  BLOCK_SIGNALS;
-  BLOCK_CANCELATION;
   strace_enabled(-1);
   fd_flags = fcntl(fd, F_GETFD);
   strace_enabled(+1);
-  ALLOW_CANCELATION;
-  ALLOW_SIGNALS;
   if (fd_flags == -1) {
     return -1;
   }
@@ -258,6 +250,44 @@ static int getFdFexeFlags(const int fd) {
   return fflags;
 }
 
+void close_memfd(void *pFd) {
+  kprintf("pfd %p, vforked %d\n", pFd, __vforked);
+  int fd = *(int*)pFd;
+  kprintf("fd %d\n", fd);
+  if (fd == -1) {
+    return;
+  }
+  int keepErrno = errno;
+  BLOCK_SIGNALS;
+  BLOCK_CANCELATION;
+  strace_enabled(-1);
+  close(fd);
+  strace_enabled(+1);
+  ALLOW_CANCELATION;
+  ALLOW_SIGNALS;
+  errno = keepErrno;
+}
+
+static void fexecve_with_zipos(int fd, char *const argv[], char *const envp[], FEXEF fflags) {
+  if (fflags & FEXEF_ZIP) {
+    char *path = alloca(PATH_MAX);
+    FormatInt32(stpcpy(path, "COSMOPOLITAN_INIT_ZIPOS="), fd);
+    size_t numenvs;
+    for (numenvs = 0; envp[numenvs];) ++numenvs;
+    static _Thread_local char *envs[500];
+    memcpy(envs, envp, numenvs * sizeof(char *));
+    envs[numenvs] = path;
+    envs[numenvs + 1] = NULL;
+    envp = envs;
+  }
+  fexecve_impl(fd, argv, envp);
+  char path[14 + 12];
+  FormatInt32(stpcpy(path, "/dev/fd/"), fd);
+  STRACE("execve(%#s, %s) due to %s", path, DescribeStringList(argv),
+         _strerrno(errno));
+  sys_execve(path, argv, envp);
+}
+
 /**
  * Executes binary executable at file descriptor.
  *
@@ -281,68 +311,49 @@ static int getFdFexeFlags(const int fd) {
  * @raise ENOEXEC if file at `fd` fails to execute
  * @raise ENOSYS on Windows, XNU, OpenBSD, NetBSD, and Metal
  * @raise ENOTSUP if a zipos file is passed when vforked
+ * @asyncsignalsafe
+ * @vforksafe
  */
 int fexecve(int fd, char *const argv[], char *const envp[]) {
   int rc = 0;
-  if (!argv || !envp) {
-    rc = efault();
-  } else {
-    STRACE("fexecve(%d, %s, %s) → ...", fd, DescribeStringList(argv),
-           DescribeStringList(envp));
-    const int origfd = fd;
-    do {
-      if (!IsLinux() && !IsFreebsd()) {
-        rc = enosys();
+  STRACE("fexecve(%d, %s, %s) → ...", fd, DescribeStringList(argv),
+         DescribeStringList(envp));
+  do {
+    if (!argv || !envp) {
+      rc = efault();
+      break;
+    }
+    if (!IsLinux() && !IsFreebsd()) {
+      rc = enosys();
+      break;
+    }
+    FEXEF fflags = 0;
+    if (__isfdkind(fd, kFdZip)) {
+      if (__vforked) {
+        rc = enotsup();
         break;
       }
-      FEXEF fflags = 0;
-      if (__isfdkind(fd, kFdZip)) {
-        BLOCK_SIGNALS;
-        BLOCK_CANCELATION;
-        strace_enabled(-1);
-        fd = fd_to_mem_fd(fd, &fflags);
-        strace_enabled(+1);
-        ALLOW_CANCELATION;
-        ALLOW_SIGNALS;
-        if (fd == -1) {
-          break;
-        }
-      } else {
-        if((fflags = getFdFexeFlags(fd)) == -1) {
-          break;
-        }
-      }
-      if (fflags & FEXEF_ZIP) {
-        char *path = alloca(PATH_MAX);
-        FormatInt32(stpcpy(path, "COSMOPOLITAN_INIT_ZIPOS="), fd);
-        size_t numenvs;
-        for (numenvs = 0; envp[numenvs];) ++numenvs;
-        static _Thread_local char *envs[500];
-        memcpy(envs, envp, numenvs * sizeof(char *));
-        envs[numenvs] = path;
-        envs[numenvs + 1] = NULL;
-        envp = envs;
-      }
-      fexecve_impl(fd, argv, envp);
-      char path[14 + 12];
-      FormatInt32(stpcpy(path, "/dev/fd/"), fd);
-      STRACE("execve(%#s, %s) due to %s", path, DescribeStringList(argv),
-             _strerrno(errno));
-      sys_execve(path, argv, envp);
-    } while (0);
-    if (fd != origfd) {
-      int keepErrno = errno;
+      int memfd = -1;
+      pthread_cleanup_push(&close_memfd, &memfd);
       BLOCK_SIGNALS;
       BLOCK_CANCELATION;
       strace_enabled(-1);
-      close(fd);
+      fd = memfd = fd_to_mem_fd(fd, &fflags);
       strace_enabled(+1);
       ALLOW_CANCELATION;
       ALLOW_SIGNALS;
-      errno = keepErrno;
+      if (fd != -1) {
+        fexecve_with_zipos(fd, argv, envp, fflags);
+      }
+      pthread_cleanup_pop(1);
+    } else {
+      if((fflags = getFdFexeFlags(fd)) == -1) {
+        break;
+      }
+      fexecve_with_zipos(fd, argv, envp, fflags);
     }
-    rc = -1;
-  }
+  } while (0);
+  rc = -1;
   STRACE("fexecve(%d) failed %d% m", fd, rc);
   return rc;
 }
