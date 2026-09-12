@@ -48,11 +48,6 @@
 #include "libc/sysv/errfuns.h"
 #include "libc/zip.h"
 
-static bool IsAPEFd(const int fd) {
-  char buf[8];
-  return (sys_pread(fd, buf, 8, 0, 0) == 8) && IsApeMagic(buf);
-}
-
 static int fexecve_impl(const int fd, char *const argv[], char *const envp[]) {
   int rc;
   if (IsLinux()) {
@@ -75,27 +70,6 @@ static int isZipFile(const void *data, size_t data_size) {
   return _weaken(GetZipEocd)(data, data_size, &ziperror) != NULL;
 }
 
-//  __sys_mmap used instead of mmap to be vfork safer
-static int isFdAZipFile(const int fd) {
-  if (!_weaken(GetZipEocd)) {
-    return enosys();
-  }
-
-  struct stat st;
-  if (fstat(fd, &st) == -1) {
-    return -1;
-  }
-  void *space = __sys_mmap(0, st.st_size, PROT_READ, MAP_SHARED, fd, 0, 0);
-  if (space == MAP_FAILED) {
-    return -1;
-  }
-  int rc = isZipFile(space, st.st_size);
-  if (__sys_munmap(space, st.st_size) == -1) {
-    return -1;
-  }
-  return rc;
-}
-
 typedef enum {
   FEXEF_ZIP = 1 << 0,
   FEXEF_APE = 1 << 1
@@ -112,6 +86,26 @@ static int getFexeFlags(const void *data, size_t data_size) {
   int flags = rc << 0;
   if (data_size >= 8) {
     flags |= (int)IsApeMagic(data) << 1;
+  }
+  return flags;
+}
+
+//  __sys_mmap used instead of mmap to be vfork safer
+static int __getFdFexeFlags(const int fd) {
+  if (!_weaken(GetZipEocd)) {
+    return enosys();
+  }
+  struct stat st;
+  if (fstat(fd, &st) == -1) {
+    return -1;
+  }
+  void *space = __sys_mmap(0, st.st_size, PROT_READ, MAP_SHARED, fd, 0, 0);
+  if (space == MAP_FAILED) {
+    return -1;
+  }
+  int flags = getFexeFlags(space, st.st_size);
+  if (__sys_munmap(space, st.st_size) == -1) {
+    return -1;
   }
   return flags;
 }
@@ -203,7 +197,7 @@ static bool fd_to_mem_fd(const int infd, FEXEF *flags, int *outfd) {
     if (savedErrno != 0) {
       errno = savedErrno;
     }
-  fd_to_mem_fd_CLOSE:
+fd_to_mem_fd_CLOSE:
     savedErrno = errno;
     close(fd);
     errno = savedErrno;
@@ -215,49 +209,39 @@ fd_to_mem_fd_ALLOW:
   return success;
 }
 
+/**
+* Determines if a file is a zip and/or APE file.
+*
+* On Linux if O_PATH is set no determination is made as the file is not readable
+*/
 static int getFdFexeFlags(const int fd) {
+  char buf[8];
+  ssize_t rcRead;
   int fl_flags;
-  strace_enabled(-1);
-  fl_flags = fcntl(fd, F_GETFL);
-  strace_enabled(+1);
-  if (fl_flags == -1) {
-    return -1;
-  }
-  bool execute_only = IsLinux() && fl_flags & _O_PATH;
-  if (execute_only) {
-    return 0;
-  }
-  FEXEF fflags = 0;
-  int fd_flags;
-  strace_enabled(-1);
-  fd_flags = fcntl(fd, F_GETFD);
-  strace_enabled(+1);
-  if (fd_flags == -1) {
-    return -1;
-  }
-  if ((fd_flags & FD_CLOEXEC) == 0) {
-    int isFdAZipFileRc;
-    BLOCK_SIGNALS;
-    BLOCK_CANCELATION;
-    strace_enabled(-1);
-    isFdAZipFileRc = isFdAZipFile(fd);
-    strace_enabled(+1);
-    ALLOW_CANCELATION;
-    ALLOW_SIGNALS;
-    if (isFdAZipFileRc == -1) {
-      return -1;
-    }
-    fflags = isFdAZipFileRc << 0;
-  }
-  bool isAPE;
+  int fd_flags = 0;
+  FEXEF fflags = -1;
   BLOCK_SIGNALS;
   BLOCK_CANCELATION;
-  isAPE = IsAPEFd(fd);
+  strace_enabled(-1);
+  if ((fl_flags = fcntl(fd, F_GETFL)) == -1) {
+    fflags = -1;
+  } else if (IsLinux() && fl_flags & _O_PATH) {
+    fflags = 0;
+  } else if ((fd_flags = fcntl(fd, F_GETFD)) == -1) {
+    fflags = -1;
+  } else if ((fd_flags & FD_CLOEXEC) == 0) {
+    fflags = __getFdFexeFlags(fd);
+  } else if ((rcRead = sys_pread(fd, buf, 8, 0, 0)) == -1) {
+    fflags = -1;
+  } else {
+    int isAPE = (rcRead == 8) && IsApeMagic(buf);
+    fflags = isAPE << 1;
+  }
+  strace_enabled(+1);
   ALLOW_CANCELATION;
   ALLOW_SIGNALS;
-  fflags |= (int)isAPE << 1;
-  if (fd_flags & FD_CLOEXEC) {
-    if (isAPE) {
+  if ((fflags != -1) && (fd_flags & FD_CLOEXEC)) {
+    if (fflags & FEXEF_APE) {
       STRACE("warning: APE fd (%d) has FD_CLOEXEC set, APE loading likely not possible", fd);
     } else if (IsAarch64() && IsQemuUser()) {
       STRACE("warning: fd (%d) has FD_CLOEXEC set, qemu user loading likely not possible", fd);
