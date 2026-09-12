@@ -90,7 +90,7 @@ static int isFdAZipFile(const int fd) {
     return -1;
   }
   int rc = isZipFile(space, st.st_size);
-  if(__sys_munmap(space, st.st_size) == -1) {
+  if (__sys_munmap(space, st.st_size) == -1) {
     return -1;
   }
   return rc;
@@ -136,67 +136,83 @@ static int getFexeFlags(const void *data, size_t data_size) {
  * prevents the qemu aarch64 user interpreter from accessing the ELF, so we
  * don't set it then either.
  *
+ * @param outfd should have a pthread_cleanup handler registered such as
+ * close_memfd so the created memfd isn't leaked in the event of pthread
+ * cancellation.
  */
-static int fd_to_mem_fd(const int infd, FEXEF *flags) {
+static bool fd_to_mem_fd(const int infd, FEXEF *flags, int *outfd) {
+  struct stat st;
+  void *space;
+  int fexe_flags, fd;
+  int savedErrno = 0;
+  bool success = false;
+
   if (!IsLinux() && !IsFreebsd()) {
-    return enosys();
-  } else if(__vforked) {
-    return enotsup();
+    enosys();
+    return false;
+  } else if (__vforked) {
+    enotsup();
+    return false;
   }
 
-  struct stat st;
+  BLOCK_SIGNALS;
+  BLOCK_CANCELATION;
+  strace_enabled(-1);
   if (fstat(infd, &st) == -1) {
-    return -1;
+    goto fd_to_mem_fd_ALLOW;
   }
-  int fd;
   if (IsLinux()) {
     fd = sys_memfd_create(__func__, 0);
   } else if (IsFreebsd()) {
     fd = sys_shm_open(SHM_ANON, O_CREAT | O_RDWR, 0);
   } else {
-    return enosys();
+    fd = enosys();
   }
   if (fd == -1) {
-    return -1;
+    goto fd_to_mem_fd_ALLOW;
   }
-  void *space;
-  if ((sys_ftruncate(fd, st.st_size, st.st_size) != -1) &&
-      ((space = mmap(0, st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED,
-                              fd, 0)) != MAP_FAILED)) {
-    ssize_t readRc;
-    readRc = pread(infd, space, st.st_size, 0);
-    bool success = readRc != -1;
-    if (success) {
-      int fexe_flags = getFexeFlags(space, st.st_size);
-      success = fexe_flags != -1;
-      *flags = fexe_flags;
-    }
-    const int e = errno;
-    if ((munmap(space, st.st_size) != -1) && success) {
-      if (((*flags & (FEXEF_ZIP | FEXEF_APE)) == 0) && (!IsAarch64() || !IsQemuUser())) {
-        // setting cloexec isn't strictly required, don't fail if it does
-        int flags = fcntl(fd, F_GETFD);
-        if (flags != -1) {
-          fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
-        }
-      } else {
-        // The dup isn't strictly required, don't fail if it does
-        const int highfd = fcntl(fd, F_DUPFD, 9001);
-        if (highfd != -1) {
-          close(fd);
-          fd = highfd;
-        }
+  if ((sys_ftruncate(fd, st.st_size, st.st_size) == -1) ||
+      ((space = mmap(0, st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+                     0)) == MAP_FAILED)) {
+    goto fd_to_mem_fd_CLOSE;
+  }
+  success = (pread(infd, space, st.st_size, 0) == st.st_size) &&
+            ((fexe_flags = getFexeFlags(space, st.st_size)) != -1);
+  if (!success) {
+    savedErrno = errno;
+  }
+  if ((success = ((munmap(space, st.st_size) == 0) && success))) {
+    if (((fexe_flags & (FEXEF_ZIP | FEXEF_APE)) == 0) &&
+        (!IsAarch64() || !IsQemuUser())) {
+      // setting cloexec isn't strictly required, don't fail if it does
+      int flags = fcntl(fd, F_GETFD);
+      if (flags != -1) {
+        fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
       }
-      unassert(readRc == st.st_size);
-      return fd;
-    } else if (!success) {
-      errno = e;
+    } else {
+      // The dup isn't strictly required, don't fail if it does
+      const int highfd = fcntl(fd, F_DUPFD, 9001);
+      if (highfd != -1) {
+        close(fd);
+        fd = highfd;
+      }
     }
+    *flags = fexe_flags;
+    *outfd = fd;
+  } else {
+    if (savedErrno != 0) {
+      errno = savedErrno;
+    }
+  fd_to_mem_fd_CLOSE:
+    savedErrno = errno;
+    close(fd);
+    errno = savedErrno;
   }
-  const int e = errno;
-  close(fd);
-  errno = e;
-  return -1;
+fd_to_mem_fd_ALLOW:
+  strace_enabled(+1);
+  ALLOW_CANCELATION;
+  ALLOW_SIGNALS;
+  return success;
 }
 
 static int getFdFexeFlags(const int fd) {
@@ -251,9 +267,7 @@ static int getFdFexeFlags(const int fd) {
 }
 
 void close_memfd(void *pFd) {
-  kprintf("pfd %p, vforked %d\n", pFd, __vforked);
   int fd = *(int*)pFd;
-  kprintf("fd %d\n", fd);
   if (fd == -1) {
     return;
   }
@@ -335,19 +349,12 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
       }
       int memfd = -1;
       pthread_cleanup_push(&close_memfd, &memfd);
-      BLOCK_SIGNALS;
-      BLOCK_CANCELATION;
-      strace_enabled(-1);
-      fd = memfd = fd_to_mem_fd(fd, &fflags);
-      strace_enabled(+1);
-      ALLOW_CANCELATION;
-      ALLOW_SIGNALS;
-      if (fd != -1) {
-        fexecve_with_zipos(fd, argv, envp, fflags);
+      if (fd_to_mem_fd(fd, &fflags, &memfd)) {
+        fexecve_with_zipos(memfd, argv, envp, fflags);
       }
       pthread_cleanup_pop(1);
     } else {
-      if((fflags = getFdFexeFlags(fd)) == -1) {
+      if ((fflags = getFdFexeFlags(fd)) == -1) {
         break;
       }
       fexecve_with_zipos(fd, argv, envp, fflags);
