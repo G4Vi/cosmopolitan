@@ -77,6 +77,19 @@ TEST(execve, APEwithZipos) {
   free(zipread);
 }
 
+TEST(execve, whenEmptyArgvNotSupportedReturnENOTSUP) {
+  if (IsWindows())
+    return;
+  const char *prog = "./fake-prog";
+  ASSERT_EQ(3, creat(prog, 0555));
+  ASSERT_EQ(0, close(3));
+  SPAWN(fork);
+  execve(prog, (char *const[]){0}, (char *const[]){0});
+  ASSERT_EQ(ENOTSUP, errno);
+  _exit(42);
+  EXITS(42);
+}
+
 TEST(execve, ziposELF) {
   if (1)
     return;  // TODO: rewrite
