@@ -14,9 +14,7 @@ TEST_LIBC_PROC_COMS =							\
 
 TEST_LIBC_PROC_BINS =						\
 	$(TEST_LIBC_PROC_COMS)					\
-	$(TEST_LIBC_PROC_COMS:%=%.dbg)			\
-	o/$(MODE)/test/libc/proc/zipread.dbg	\
-	o/$(MODE)/test/libc/proc/zipread
+	$(TEST_LIBC_PROC_COMS:%=%.dbg)
 
 TEST_LIBC_PROC_TESTS =							\
 	$(TEST_LIBC_PROC_SRCS_TEST:%.c=o/$(MODE)/%.ok)
@@ -106,6 +104,7 @@ o/$(MODE)/test/libc/proc/execve_test.dbg:				\
 		o/$(MODE)/test/libc/proc/echo.elf.zip.o			\
 		o/$(MODE)/test/libc/proc/life-nozip.elf.zip.o		\
 		o/$(MODE)/test/libc/proc/life-nozip.zip.o		\
+		o/$(MODE)/test/libc/proc/noleaks.elf.zip.o		\
 		o/$(MODE)/test/libc/proc/zipread.zip.o			\
 		o/$(MODE)/test/libc/proc/zipread.elf.zip.o		\
 		o/$(MODE)/test/libc/mem/prog/sock.elf.zip.o		\
@@ -122,6 +121,7 @@ o/$(MODE)/test/libc/proc/fexecve_test.dbg:				\
 		o/$(MODE)/test/libc/proc/echo.elf.zip.o			\
 		o/$(MODE)/test/libc/proc/life-nozip.elf.zip.o		\
 		o/$(MODE)/test/libc/proc/life-nozip.zip.o		\
+		o/$(MODE)/test/libc/proc/noleaks.elf.zip.o		\
 		o/$(MODE)/test/libc/proc/zipread.zip.o			\
 		o/$(MODE)/test/libc/proc/zipread.elf.zip.o		\
 		$(LIBC_TESTMAIN)					\
@@ -192,6 +192,22 @@ o/$(MODE)/test/libc/proc/life-nozip.elf:				\
 		o/$(MODE)/tool/build/zipremove			\
 		o/$(MODE)/test/libc/proc/life-nozip.elf
 
+o/$(MODE)/test/libc/proc/noleaks.elf:				\
+		o/$(MODE)/tool/build/assimilate		\
+		o/$(MODE)/tool/build/cp			\
+		o/$(MODE)/tool/build/zipremove		\
+		o/$(MODE)/test/libc/proc/noleaks
+	@$(COMPILE) -wACP -T$@					\
+		o/$(MODE)/tool/build/cp				\
+		o/$(MODE)/test/libc/proc/noleaks		\
+		o/$(MODE)/test/libc/proc/noleaks.elf
+	@$(COMPILE) -wAASSIMILATE -T$@				\
+		o/$(MODE)/tool/build/assimilate -bcef	\
+		o/$(MODE)/test/libc/proc/noleaks.elf
+	@$(COMPILE) -wAZIPREMOVE -T$@				\
+		o/$(MODE)/tool/build/zipremove			\
+		o/$(MODE)/test/libc/proc/noleaks.elf
+
 o/$(MODE)/test/libc/proc/life.zip.o					\
 o/$(MODE)/test/libc/proc/execve_test_prog1.zip.o			\
 o/$(MODE)/test/libc/proc/execve_test_prog2.zip.o			\
@@ -199,6 +215,7 @@ o/$(MODE)/test/libc/proc/life-nozip.zip.o				\
 o/$(MODE)/test/libc/proc/life-nozip.elf.zip.o				\
 o/$(MODE)/test/libc/proc/life-pe.zip.o			\
 o/$(MODE)/test/libc/proc/echo.elf.zip.o					\
+o/$(MODE)/test/libc/proc/noleaks.elf.zip.o				\
 o/$(MODE)/test/libc/proc/zipread.elf.zip.o				\
 o/$(MODE)/test/libc/proc/zipread.zip.o: private		\
 		ZIPOBJ_FLAGS +=					\

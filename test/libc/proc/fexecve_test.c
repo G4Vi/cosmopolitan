@@ -2,6 +2,7 @@
 │ vi: set et ft=c ts=2 sts=2 sw=2 fenc=utf-8                               :vi │
 ╞══════════════════════════════════════════════════════════════════════════════╡
 │ Copyright 2022 Justine Alexandra Roberts Tunney                              │
+│ Copyright 2026 Gavin Arthur Hayes                                            │
 │                                                                              │
 │ Permission to use, copy, modify, and/or distribute this software for         │
 │ any purpose with or without fee is hereby granted, provided that the         │
@@ -62,12 +63,11 @@ void SetUp(void) {
 }
 
 TEST(fexecve, elf) {
-  int extracted_mode = 0555;
   int open_flags = O_RDONLY | o_cloexec;
   if (IsAarch64() && IsQemuUser()) {
     open_flags &= ~O_CLOEXEC;
   }
-  testlib_extract("/zip/life-nozip.elf", "life-nozip.elf", extracted_mode);
+  testlib_extract("/zip/life-nozip.elf", "life-nozip.elf", 0555);
   SPAWN(vfork);
   ASSERT_SYS(0, 3, open("life-nozip.elf", open_flags));
   ASSERT_SYS(0, 0,
@@ -76,23 +76,27 @@ TEST(fexecve, elf) {
   EXITS(42);
 }
 
-// With a file on disk is fexecve'd the path is still available to `open` zipos
-// so COSMOPOLITAN_INIT_ZIPOS= is not needed.
 TEST(fexecve, elfWithZipos) {
-  int extracted_mode = 0555;
-  int open_flags = O_RDONLY | o_cloexec;
-  if (IsAarch64() && IsQemuUser()) {
-    extracted_mode = 0555;
-    open_flags &= ~O_CLOEXEC;
-  }
-  testlib_extract("/zip/zipread.elf", "zipread.elf", extracted_mode);
+  testlib_extract("/zip/zipread.elf", "zipread.elf", 0555);
   SPAWN(vfork);
-  ASSERT_SYS(0, 3, open("zipread.elf", open_flags));
+  ASSERT_SYS(0, 3, open("zipread.elf", O_RDONLY));
   ASSERT_SYS(0, 0,
              fexecve(3, (char *const[]){"zipread.elf", 0}, (char *const[]){0}));
   EXITS(42);
 }
-// TODO(G4Vi): also test elfWithZipos with COSMOPOLITAN_INIT_ZIPOS=
+
+// With a file on disk is fexecve'd the path is still available to `open` zipos
+// so COSMOPOLITAN_INIT_ZIPOS= is not needed.
+TEST(fexecve, elfWithZiposCloexec) {
+  if (!o_cloexec) return;
+  if (IsAarch64() && IsQemuUser()) return;
+  testlib_extract("/zip/zipread.elf", "zipread.elf", 0555);
+  SPAWN(vfork);
+  ASSERT_SYS(0, 3, open("zipread.elf", O_RDONLY | O_CLOEXEC));
+  ASSERT_SYS(0, 0,
+             fexecve(3, (char *const[]){"zipread.elf", 0}, (char *const[]){0}));
+  EXITS(42);
+}
 
 TEST(fexecve, elfIsUnreadable_mayBeExecuted) {
   if (!SupportsOPATH) return;
@@ -170,7 +174,17 @@ TEST(fexecve, ziposELF) {
   EXITS(42);
   close(fd);
 }
-// TODO(G4Vi): check no fd is leaked
+
+TEST(fexecve, ziposELFNoFdLeaks) {
+  if (!SupportsMemfdCreate) return;
+  if (IsAarch64() && IsQemuUser()) return;
+  int fd = open("/zip/noleaks.elf", O_RDONLY);
+  ASSERT_NE(-1, fd);
+  SPAWN(fork);
+  fexecve(fd, (char *const[]){0}, (char *const[]){0});
+  EXITS(42);
+  close(fd);
+}
 
 TEST(fexecve, ziposELFwithZipos) {
   if (!SupportsMemfdCreate) return;

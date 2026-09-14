@@ -150,6 +150,16 @@ TEST(execve, ziposELF) {
   EXITS(42);
 }
 
+TEST(execve, ziposELFNoFdLeaks) {
+  if (!SupportsElf) return;
+  if (!SupportsZiposFexecve) return;
+  if (IsAarch64() && IsQemuUser()) return;
+  SPAWN(fork);
+  execve("/zip/noleaks.elf", (char *const[]){0}, (char *const[]){0});
+  kprintf("execve failed: %m\n");
+  EXITS(42);
+}
+
 TEST(execve, ziposELFwithZipos) {
   if (!SupportsElf) return;
   if (!SupportsZiposFexecve) return;
