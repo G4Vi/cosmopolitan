@@ -17,18 +17,11 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/calls.h"
-#include "libc/dce.h"
-#include "libc/elf/elf.h"
-#include "libc/elf/struct/ehdr.h"
-#include "libc/elf/struct/shdr.h"
 #include "libc/errno.h"
 #include "libc/fmt/magnumstrs.internal.h"
-#include "libc/limits.h"
 #include "libc/runtime/runtime.h"
 #include "libc/serialize.h"
-#include "libc/stdio/stdio.h"
 #include "libc/stdio/sysparam.h"
-#include "libc/str/str.h"
 #include "libc/sysv/consts/map.h"
 #include "libc/sysv/consts/o.h"
 #include "libc/sysv/consts/prot.h"
@@ -58,24 +51,20 @@ static unsigned char *inmap;
   tinyprint(fd, "\
 NAME\n\
 \n\
-  Cosmopolitan Zip Copier\n\
+  Cosmopolitan Zip Remover\n\
 \n\
 SYNOPSIS\n\
 \n\
   ",
-            prog, " [FLAGS] SRC DST\n\
+            prog, " [FLAGS] ZIPFILE\n\
 \n\
 DESCRIPTION\n\
 \n\
-  This tool copies the zip artifacts, if they exist, to the\n\
-  end of the destination file. If no zip files exist within\n\
-  the input file, then this tool performs no operation. The\n\
-  output file will be created if it doesn't exist, which is\n\
-  useful for creating new zip archives possibly to clean up\n\
-  holes between input records. If the destination file does\n\
-  exist, e.g. an executable, then any existing content will\n\
-  be preserved, including an existing zip archive. That may\n\
-  however lead to bloat that's not easy to access.\n\
+  This tool \"removes\" zip files from files. In actuality, \n\
+  it corrupts the end of central directory record so the \n\
+  file can no longer be read as a zip file. The file is \n\
+  modified in place. If the file is not a zip file, no \n\
+  modification occurs.\n\
 \n\
 FLAGS\n\
 \n\
@@ -83,8 +72,7 @@ FLAGS\n\
 \n\
 EXAMPLE\n\
 \n\
-  objcopy -SO binary foo.dbg foo\n\
-  zipcopy foo.dbg foo\n\
+  zipremove foo\n\
 \n\
 \n\
 ",
@@ -108,7 +96,7 @@ static void GetOpts(int argc, char *argv[]) {
   inpath = argv[optind + 0];
 }
 
-static void CopyZip(void) {
+static void CorruptZip(void) {
   unsigned char *ineof, *stop, *eocd;
 
   // find zip eocd header
@@ -153,7 +141,7 @@ int main(int argc, char *argv[]) {
       MAP_FAILED) {
     SysDie(inpath, "mmap");
   }
-  CopyZip();
+  CorruptZip();
   if (munmap(inmap, insize)) {
     SysDie(inpath, "munmap");
   }
