@@ -31,7 +31,6 @@
 #include "libc/sysv/consts/s.h"
 #include "libc/testlib/subprocess.h"
 #include "libc/testlib/testlib.h"
-// clang-format off
 
 __static_yoink("zipos");
 
@@ -70,8 +69,9 @@ TEST(fexecve, elf) {
   testlib_extract("/zip/life-nozip.elf", "life-nozip.elf", 0555);
   SPAWN(vfork);
   ASSERT_SYS(0, 3, open("life-nozip.elf", open_flags));
-  ASSERT_SYS(0, 0,
-             fexecve(3, (char *const[]){"life-nozip.elf", 0}, (char *const[]){0}));
+  ASSERT_SYS(
+      0, 0,
+      fexecve(3, (char *const[]){"life-nozip.elf", 0}, (char *const[]){0}));
   exit(1);
   EXITS(42);
 }
@@ -88,8 +88,10 @@ TEST(fexecve, elfWithZipos) {
 // With a file on disk is fexecve'd the path is still available to `open` zipos
 // so COSMOPOLITAN_INIT_ZIPOS= is not needed.
 TEST(fexecve, elfWithZiposCloexec) {
-  if (!o_cloexec) return;
-  if (IsAarch64() && IsQemuUser()) return;
+  if (!o_cloexec)
+    return;
+  if (IsAarch64() && IsQemuUser())
+    return;
   testlib_extract("/zip/zipread.elf", "zipread.elf", 0555);
   SPAWN(vfork);
   ASSERT_SYS(0, 3, open("zipread.elf", O_RDONLY | O_CLOEXEC));
@@ -99,7 +101,8 @@ TEST(fexecve, elfWithZiposCloexec) {
 }
 
 TEST(fexecve, elfIsUnreadable_mayBeExecuted) {
-  if (!SupportsOPATH) return;
+  if (!SupportsOPATH)
+    return;
   int extracted_mode = 0111;
   int open_flags = _O_PATH | O_CLOEXEC;
   if (IsAarch64() && IsQemuUser()) {
@@ -123,16 +126,17 @@ TEST(fexecve, elfIsUnreadable_mayBeExecuted) {
 }
 
 TEST(fexecve, memfd_create) {
-  if (!SupportsMemfdCreate) return;
+  if (!SupportsMemfdCreate)
+    return;
   int life_fd = open("/zip/life-nozip.elf", O_RDONLY);
   ASSERT_NE(-1, life_fd);
   const int memfd_flags = (IsAarch64() && IsQemuUser()) ? 0 : MFD_CLOEXEC;
   int fd = sys_memfd_create("foo", memfd_flags);
-  if(fd == -1) {
+  if (fd == -1) {
     ASSERT_EQ(ENOSYS, errno);
     return;
   }
-  while(1) {
+  while (1) {
     const ssize_t bytes_read = read(life_fd, elf_buf, sizeof(elf_buf));
     if (bytes_read <= 0) {
       ASSERT_LE(0, bytes_read);
@@ -166,7 +170,8 @@ TEST(fexecve, APEwithZipos) {
 }
 
 TEST(fexecve, ziposELF) {
-  if (!SupportsMemfdCreate) return;
+  if (!SupportsMemfdCreate)
+    return;
   int fd = open("/zip/life-nozip.elf", O_RDONLY);
   ASSERT_NE(-1, fd);
   SPAWN(fork);
@@ -176,8 +181,10 @@ TEST(fexecve, ziposELF) {
 }
 
 TEST(fexecve, ziposELFNoFdLeaks) {
-  if (!SupportsMemfdCreate) return;
-  if (IsAarch64() && IsQemuUser()) return;
+  if (!SupportsMemfdCreate)
+    return;
+  if (IsAarch64() && IsQemuUser())
+    return;
   int fd = open("/zip/noleaks.elf", O_RDONLY);
   ASSERT_NE(-1, fd);
   SPAWN(fork);
@@ -187,7 +194,8 @@ TEST(fexecve, ziposELFNoFdLeaks) {
 }
 
 TEST(fexecve, ziposELFwithZipos) {
-  if (!SupportsMemfdCreate) return;
+  if (!SupportsMemfdCreate)
+    return;
   int fd = open("/zip/zipread.elf", O_RDONLY);
   ASSERT_NE(-1, fd);
   SPAWN(fork);
@@ -197,7 +205,8 @@ TEST(fexecve, ziposELFwithZipos) {
 }
 
 TEST(fexecve, ziposAPE) {
-  if (!SupportsMemfdCreate) return;
+  if (!SupportsMemfdCreate)
+    return;
   int fd = open("/zip/life-nozip", O_RDONLY);
   ASSERT_NE(-1, fd);
   SPAWN(fork);
@@ -207,7 +216,8 @@ TEST(fexecve, ziposAPE) {
 }
 
 TEST(fexecve, ziposAPEwithZipos) {
-  if (!SupportsMemfdCreate) return;
+  if (!SupportsMemfdCreate)
+    return;
   int fd = open("/zip/zipread", O_RDONLY);
   ASSERT_NE(-1, fd);
   SPAWN(fork);

@@ -108,7 +108,11 @@ bool __is_linux_2_6_39(void) {
   cosmo_once(&___is_linux_uname_release.once, ___is_linux_uname_release_init);
   if (!___is_linux_uname_release.valid)
     return false;
-  return ___is_linux_uname_release.major > 2 || (___is_linux_uname_release.major == 2 && (___is_linux_uname_release.minor > 6 || (___is_linux_uname_release.minor == 6 && ___is_linux_uname_release.patch >= 39)));
+  return ___is_linux_uname_release.major > 2 ||
+         (___is_linux_uname_release.major == 2 &&
+          (___is_linux_uname_release.minor > 6 ||
+           (___is_linux_uname_release.minor == 6 &&
+            ___is_linux_uname_release.patch >= 39)));
 }
 
 /**
@@ -120,5 +124,7 @@ bool __is_linux_3_17(void) {
   cosmo_once(&___is_linux_uname_release.once, ___is_linux_uname_release_init);
   if (!___is_linux_uname_release.valid)
     return false;
-  return ___is_linux_uname_release.major > 3 || (___is_linux_uname_release.major == 3 && ___is_linux_uname_release.minor >= 17);
+  return ___is_linux_uname_release.major > 3 ||
+         (___is_linux_uname_release.major == 3 &&
+          ___is_linux_uname_release.minor >= 17);
 }

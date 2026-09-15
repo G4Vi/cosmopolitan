@@ -70,9 +70,12 @@ void SetUp(void) {
       o_cloexec = 0;
     }
     struct stat st;
-    SupportsZiposFexecve = __is_linux_3_17() && stat("/proc/self/fd", &st) == 0 && S_ISDIR(st.st_mode);
+    SupportsZiposFexecve = __is_linux_3_17() &&
+                           stat("/proc/self/fd", &st) == 0 &&
+                           S_ISDIR(st.st_mode);
   }
-  // TODO(G4Vi): Confirm if OpenBSD actually has an issue with this, see note in posix_spawn_test.c
+  // TODO(G4Vi): Confirm if OpenBSD actually has an issue with this, see note in
+  // posix_spawn_test.c
   if (!IsOpenbsd() && !IsXnu() && !IsWindows() && !IsMetal()) {
     SupportsElf = true;
   }
@@ -95,7 +98,8 @@ TEST(execve, testArgPassing) {
 }
 
 TEST(execve, elf) {
-  if (!SupportsElf) return;
+  if (!SupportsElf)
+    return;
   testlib_extract("/zip/echo.elf", "echo", 0555);
   ASSERT_SYS(0, 0, pipe2(fds, o_cloexec));
   SPAWN(vfork);
@@ -113,7 +117,8 @@ TEST(execve, elf) {
 }
 
 TEST(execve, elfIsUnreadable_mayBeExecuted) {
-  if (!SupportsElf) return;
+  if (!SupportsElf)
+    return;
   if (IsAarch64() && IsQemuUser()) {
     return;
   }
@@ -134,17 +139,20 @@ TEST(execve, elfIsUnreadable_mayBeExecuted) {
 }
 
 TEST(execve, ziposWithoutSupport) {
-  if (SupportsZiposFexecve) return;
+  if (SupportsZiposFexecve)
+    return;
   SPAWN(fork);
   ASSERT_SYS(ENOSYS, -1,
-               execve("/zip/life-nozip", (char *const[]){0}, (char *const[]){0}));
+             execve("/zip/life-nozip", (char *const[]){0}, (char *const[]){0}));
   _exit(0);
   EXITS(0);
 }
 
 TEST(execve, ziposELF) {
-  if (!SupportsElf) return;
-  if (!SupportsZiposFexecve) return;
+  if (!SupportsElf)
+    return;
+  if (!SupportsZiposFexecve)
+    return;
   SPAWN(fork);
   execve("/zip/life-nozip.elf", (char *const[]){0}, (char *const[]){0});
   kprintf("execve failed: %m\n");
@@ -152,9 +160,12 @@ TEST(execve, ziposELF) {
 }
 
 TEST(execve, ziposELFNoFdLeaks) {
-  if (!SupportsElf) return;
-  if (!SupportsZiposFexecve) return;
-  if (IsAarch64() && IsQemuUser()) return;
+  if (!SupportsElf)
+    return;
+  if (!SupportsZiposFexecve)
+    return;
+  if (IsAarch64() && IsQemuUser())
+    return;
   SPAWN(fork);
   execve("/zip/noleaks.elf", (char *const[]){0}, (char *const[]){0});
   kprintf("execve failed: %m\n");
@@ -162,8 +173,10 @@ TEST(execve, ziposELFNoFdLeaks) {
 }
 
 TEST(execve, ziposELFwithZipos) {
-  if (!SupportsElf) return;
-  if (!SupportsZiposFexecve) return;
+  if (!SupportsElf)
+    return;
+  if (!SupportsZiposFexecve)
+    return;
   SPAWN(fork);
   execve("/zip/zipread.elf", (char *const[]){0}, (char *const[]){0});
   kprintf("execve failed: %m\n");
@@ -171,7 +184,8 @@ TEST(execve, ziposELFwithZipos) {
 }
 
 TEST(execve, ziposAPE) {
-  if (!SupportsZiposFexecve) return;
+  if (!SupportsZiposFexecve)
+    return;
   SPAWN(fork);
   execve("/zip/life-nozip", (char *const[]){0}, (char *const[]){0});
   kprintf("execve failed: %m\n");
@@ -179,7 +193,8 @@ TEST(execve, ziposAPE) {
 }
 
 TEST(execve, ziposAPEwithZipos) {
-  if (!SupportsZiposFexecve) return;
+  if (!SupportsZiposFexecve)
+    return;
   SPAWN(fork);
   execve("/zip/zipread", (char *const[]){0}, (char *const[]){0});
   kprintf("execve failed: %m\n");
@@ -191,7 +206,8 @@ TEST(execve, ziposVforked) {
     return;
   }
   SPAWN(vfork);
-  ASSERT_SYS(ENOTSUP, -1, execve("/zip/life-nozip", (char *const[]){0}, (char *const[]){0}));
+  ASSERT_SYS(ENOTSUP, -1,
+             execve("/zip/life-nozip", (char *const[]){0}, (char *const[]){0}));
   _exit(0);
   EXITS(0);
 }

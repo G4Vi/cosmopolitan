@@ -70,10 +70,7 @@ static int isZipFile(const void *data, size_t data_size) {
   return _weaken(GetZipEocd)(data, data_size, &ziperror) != NULL;
 }
 
-typedef enum {
-  FEXEF_ZIP = 1 << 0,
-  FEXEF_APE = 1 << 1
-} FEXEF;
+typedef enum { FEXEF_ZIP = 1 << 0, FEXEF_APE = 1 << 1 } FEXEF;
 
 static int getFexeFlags(const void *data, size_t data_size) {
   if (!_weaken(GetZipEocd)) {
@@ -197,7 +194,7 @@ static bool fd_to_mem_fd(const int infd, FEXEF *flags, int *outfd) {
     if (savedErrno != 0) {
       errno = savedErrno;
     }
-fd_to_mem_fd_CLOSE:
+  fd_to_mem_fd_CLOSE:
     savedErrno = errno;
     close(fd);
     errno = savedErrno;
@@ -210,10 +207,11 @@ fd_to_mem_fd_ALLOW:
 }
 
 /**
-* Determines if a file is a zip and/or APE file.
-*
-* On Linux if O_PATH is set no determination is made as the file is not readable
-*/
+ * Determines if a file is a zip and/or APE file.
+ *
+ * On Linux if O_PATH is set, no determination is made as the file is not
+ * readable.
+ */
 static int getFdFexeFlags(const int fd) {
   char buf[8];
   ssize_t rcRead;
@@ -242,16 +240,20 @@ static int getFdFexeFlags(const int fd) {
   ALLOW_SIGNALS;
   if ((fflags != -1) && (fd_flags & FD_CLOEXEC)) {
     if (fflags & FEXEF_APE) {
-      STRACE("warning: APE fd (%d) has FD_CLOEXEC set, APE loading likely not possible", fd);
+      STRACE("warning: APE fd (%d) has FD_CLOEXEC set, APE loading likely not "
+             "possible",
+             fd);
     } else if (IsAarch64() && IsQemuUser()) {
-      STRACE("warning: fd (%d) has FD_CLOEXEC set, qemu user loading likely not possible", fd);
+      STRACE("warning: fd (%d) has FD_CLOEXEC set, qemu user loading likely "
+             "not possible",
+             fd);
     }
   }
   return fflags;
 }
 
 void close_memfd(void *pFd) {
-  int fd = *(int*)pFd;
+  int fd = *(int *)pFd;
   if (fd == -1) {
     return;
   }
@@ -266,12 +268,14 @@ void close_memfd(void *pFd) {
   errno = keepErrno;
 }
 
-static void fexecve_with_zipos(int fd, char *const argv[], char *const envp[], FEXEF fflags) {
+static void fexecve_with_zipos(int fd, char *const argv[], char *const envp[],
+                               FEXEF fflags) {
   if (fflags & FEXEF_ZIP) {
     char *path = alloca(PATH_MAX);
     FormatInt32(stpcpy(path, "COSMOPOLITAN_INIT_ZIPOS="), fd);
     size_t numenvs;
-    for (numenvs = 0; envp[numenvs];) ++numenvs;
+    for (numenvs = 0; envp[numenvs];)
+      ++numenvs;
     static _Thread_local char *envs[500];
     memcpy(envs, envp, numenvs * sizeof(char *));
     envs[numenvs] = path;
