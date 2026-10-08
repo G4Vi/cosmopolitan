@@ -38,6 +38,7 @@
 #include "libc/paths.h"
 #include "libc/proc/execve.internal.h"
 #include "libc/str/str.h"
+#include "libc/sysv/consts/at.h"
 #include "libc/sysv/consts/f.h"
 #include "libc/sysv/consts/map.h"
 #include "libc/sysv/consts/mfd.h"
@@ -55,9 +56,7 @@ Copyright (c) 2026 Gavin Arthur Hayes <gavin@computoid.com>");
 static int fexecve_impl(const int fd, char *const argv[], char *const envp[]) {
   int rc;
   if (IsLinux()) {
-    char path[14 + 12];
-    FormatInt32(stpcpy(path, "/proc/self/fd/"), fd);
-    rc = __sys_execve(path, argv, envp);
+    rc = sys_execveat(fd, "", argv, envp, _AT_EMPTY_PATH);
   } else if (IsFreebsd()) {
     rc = sys_fexecve(fd, argv, envp);
   } else {
