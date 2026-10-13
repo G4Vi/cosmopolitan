@@ -43,36 +43,114 @@
 #include "libc/sysv/consts/map.h"
 #include "libc/sysv/consts/mfd.h"
 #include "libc/sysv/consts/o.h"
+#include "libc/sysv/consts/ok.h"
 #include "libc/sysv/consts/prot.h"
 #include "libc/sysv/consts/s.h"
 #include "libc/sysv/consts/shm.h"
 #include "libc/sysv/errfuns.h"
+#include "libc/temp.h"
 #include "libc/zip.h"
 
 __notice(fexecve_notice, "\
 Cosmopolitan fexecve (ISC)\n\
 Copyright (c) 2026 Gavin Arthur Hayes <gavin@computoid.com>");
 
-static int fexecve_impl(const int fd, char *const argv[], char *const envp[]) {
+typedef enum {
+  FEXEF_ZIP = 1 << 0,
+  FEXEF_APE = 1 << 1,
+  FEXEF_CLOEXEC = 1 << 2
+} FEXEF;
+
+static int fexecve_impl(const int fd, char *const argv[], char *const envp[],
+                        FEXEF fflags) {
   if (IsLinux()) {
     sys_execveat(fd, "", argv, envp, _AT_EMPTY_PATH);
-  } else if (IsFreebsd()) {
+  } else if (IsFreebsd() || IsNetbsd()) {
     sys_fexecve(fd, argv, envp);
   } else {
     enosys();
   }
+
+  // by execve
   const int savedErrno = errno;
-  char path[14 + 12];
+  char path[PATH_MAX+1];
   const char *prefix = IsLinux() ? "/proc/self/fd/" : "/dev/fd/";
   FormatInt32(stpcpy(path, prefix), fd);
   errno = savedErrno;
-  if (errno == ENOSYS) {
+  if (errno == ENOSYS && !IsNetbsd()) {
     STRACE("execve(%#s, %s) due to %s", path, DescribeStringList(argv),
            _strerrno(errno));
-    sys_execve(path, argv, envp);
-  } else {
-    sys_execve_fallback(path, argv, envp);
+    __sys_execve(path, argv, envp);
   }
+  if (!(errno == ENOEXEC || (IsLinux() && errno == _ELIBBAD) ||
+        (IsNetbsd() && errno == ENOSYS))) {
+    return -1;
+  } else if ((fflags & FEXEF_CLOEXEC) == 0) {
+    bool readable;
+    BLOCK_SIGNALS;
+    BLOCK_CANCELATION;
+    strace_enabled(-1);
+    if (!(readable = (access(path, R_OK) == 0)) && IsNetbsd()) {
+      FormatInt32(stpcpy(path, "/proc/curproc/fd/"), fd);
+      readable = access(path, R_OK) == 0;
+    }
+    strace_enabled(+1);
+    ALLOW_CANCELATION;
+    ALLOW_SIGNALS;
+    if (readable) {
+      sys_execve_fallback(path, argv, envp);
+    }
+    // TODO, set cloexec if fd is memfd we created
+  }
+  // TODO reset env
+
+  // by temp file
+  // below should be be own function
+  bool success = false;
+  BLOCK_SIGNALS;
+  BLOCK_CANCELATION;
+  strace_enabled(-1);
+  const char *tmpdir = __get_tmpdir();
+  strlcpy(path, tmpdir, sizeof(path));
+  strlcat(path, "fexecve.XXXXXX", sizeof(path));
+  int tmpfd = openatemp(AT_FDCWD, path, 0, 0, 0700);
+  if (tmpfd != -1) {
+    struct stat st;
+    void *space;
+    int savedErrno = 0;
+    if (fstat(fd, &st) == -1) {
+      goto fd_to_mem_fd_CLOSE;
+    }
+    if ((sys_ftruncate(tmpfd, st.st_size, st.st_size) == -1) ||
+      ((space = mmap(0, st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, tmpfd,
+                     0)) == MAP_FAILED)) {
+      goto fd_to_mem_fd_CLOSE;
+    }
+    success = pread(fd, space, st.st_size, 0) == st.st_size;
+    if (!success) {
+      savedErrno = errno;
+    }
+    if(!(success = (munmap(space, st.st_size) == 0) && success)) {
+      if(savedErrno) {
+        errno = savedErrno;
+      }
+    }
+    fd_to_mem_fd_CLOSE:
+    close(tmpfd);
+    if (!success) {
+      unlink(path);
+    }
+  }
+  strace_enabled(+1);
+  ALLOW_CANCELATION;
+  ALLOW_SIGNALS;
+  if (success) {
+    STRACE("execve(%#s, %s) due to %s", path, DescribeStringList(argv),
+           _strerrno(errno));
+    sys_execve(path, argv, envp); //
+    unlink(path); // pthread cleanup
+  }
+  // set errno?
   return -1;
 }
 
@@ -83,8 +161,6 @@ static int isZipFile(const void *data, size_t data_size) {
   int ziperror;
   return _weaken(GetZipEocd)(data, data_size, &ziperror) != NULL;
 }
-
-typedef enum { FEXEF_ZIP = 1 << 0, FEXEF_APE = 1 << 1 } FEXEF;
 
 static int getFexeFlags(const void *data, size_t data_size) {
   if (!_weaken(GetZipEocd)) {
@@ -192,7 +268,9 @@ static bool fd_to_mem_fd(const int infd, FEXEF *flags, int *outfd) {
       // setting cloexec isn't strictly required, don't fail if it does
       int flags = fcntl(fd, F_GETFD);
       if (flags != -1) {
-        fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+        if (fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == 0) {
+          fexe_flags |= FEXEF_CLOEXEC;
+        }
       }
     } else {
       // The dup isn't strictly required, don't fail if it does
@@ -235,12 +313,11 @@ static int getFdFexeFlags(const int fd) {
   BLOCK_SIGNALS;
   BLOCK_CANCELATION;
   strace_enabled(-1);
-  if ((fl_flags = fcntl(fd, F_GETFL)) == -1) {
+  if (((fl_flags = fcntl(fd, F_GETFL)) == -1) ||
+      ((fd_flags = fcntl(fd, F_GETFD)) == -1)) {
     fflags = -1;
   } else if (IsLinux() && fl_flags & _O_PATH) {
     fflags = 0;
-  } else if ((fd_flags = fcntl(fd, F_GETFD)) == -1) {
-    fflags = -1;
   } else if ((fd_flags & FD_CLOEXEC) == 0) {
     fflags = __getFdFexeFlags(fd);
   } else if ((rcRead = sys_pread(fd, buf, 8, 0, 0)) == -1) {
@@ -253,6 +330,7 @@ static int getFdFexeFlags(const int fd) {
   ALLOW_CANCELATION;
   ALLOW_SIGNALS;
   if ((fflags != -1) && (fd_flags & FD_CLOEXEC)) {
+    fflags |= FEXEF_CLOEXEC;
     if (fflags & FEXEF_APE) {
       STRACE("warning: APE fd (%d) has FD_CLOEXEC set, APE loading likely not "
              "possible",
@@ -296,7 +374,7 @@ static void fexecve_with_zipos(int fd, char *const argv[], char *const envp[],
     envs[numenvs + 1] = NULL;
     envp = envs;
   }
-  fexecve_impl(fd, argv, envp);
+  fexecve_impl(fd, argv, envp, fflags);
 }
 
 /**
@@ -334,7 +412,7 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
       rc = efault();
       break;
     }
-    if (!IsLinux() && !IsFreebsd()) {
+    if (!IsLinux() && !IsFreebsd() && !IsNetbsd()) {
       rc = enosys();
       break;
     }

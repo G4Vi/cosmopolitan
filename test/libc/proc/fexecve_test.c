@@ -56,6 +56,8 @@ void SetUp(void) {
     o_cloexec = __is_linux_2_6_23() ? O_CLOEXEC : 0;
     SupportsOPATH = __is_linux_2_6_39();
     SupportsMemfdCreate = __is_linux_3_17();
+  } else if (IsNetbsd()) {
+    o_cloexec = O_CLOEXEC;
   } else {
     // TODO: FreeBSD and other OSes
     exit(0);
