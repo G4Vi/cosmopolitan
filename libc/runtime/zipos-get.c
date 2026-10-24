@@ -95,7 +95,7 @@ static void __zipos_generate_index(struct Zipos *zipos) {
   qsort_r(zipos->index, zipos->records, sizeof(size_t), __zipos_compare_names,
           zipos);
 }
-
+#include "libc/intrin/kprintf.h"
 static void __zipos_init(void) {
   char *endptr;
   const char *s;
@@ -105,9 +105,14 @@ static void __zipos_init(void) {
   const char *progpath;
   if (!(s = getenv("COSMOPOLITAN_DISABLE_ZIPOS"))) {
     // this environment variable may be a filename or file descriptor
-    if ((progpath = secure_getenv("COSMOPOLITAN_INIT_ZIPOS")) &&
+    if ((progpath = secure_getenv("COSMOPOLITAN_INIT_ZIPOS"))) {
+      if ((progpath[0] != '/') &&
         (x = strtol(progpath, &endptr, 10)) >= 0 && !*endptr) {
-      fd = x;
+        fd = x;
+      } else {
+        fd = shm_open(progpath, O_RDONLY, 0400);
+        kprintf("zipos fd shm %d\n", fd);
+      }
     } else {
       fd = -1;
     }

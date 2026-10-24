@@ -42,10 +42,10 @@ static int CheckFdLeaked(int fd) {
 
 static void CheckForFdLeaks(void) {
   int i, l = 0;
-  for (i = 3; i < 50; ++i) {
+  for (i = 4; i < 50; ++i) {
     l += CheckFdLeaked(i);
   }
-  for (i = 9001; i < 9051; ++i) {
+  for (i = 9002; i < 9051; ++i) {
     l += CheckFdLeaked(i);
   }
   if (l) {

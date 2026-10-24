@@ -166,7 +166,41 @@ static bool fexecve_impl_sysv(const int fd, char *const argv[],
   // setup zipos for the new executable
   if (fflags & FEXEF_ZIP) {
     char *path = alloca(PATH_MAX);
-    FormatInt32(stpcpy(path, "COSMOPOLITAN_INIT_ZIPOS="), fd);
+
+    bool success = false;
+    const char *obj = "/aaaaaaaaaaaa";
+    int shmfd = shm_open(obj, O_RDWR | O_CREAT, 0600);
+    if (shmfd != -1) {
+      struct stat st;
+      void *space;
+      int savedErrno = 0;
+      if (fstat(fd, &st) == -1) {
+        goto fexecve_impl_sysv_CLOSE;
+      }
+      if ((ftruncate(shmfd, st.st_size) == -1) ||
+          ((space = mmap(0, st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, shmfd,
+                         0)) == MAP_FAILED)) {
+        goto fexecve_impl_sysv_CLOSE;
+      }
+      success = pread(fd, space, st.st_size, 0) == st.st_size;
+      if (!success) {
+        savedErrno = errno;
+      }
+      if (!(success = (munmap(space, st.st_size) == 0) && success)) {
+        if (savedErrno) {
+          errno = savedErrno;
+        }
+      }
+      if (success) {
+        strcat(stpcpy(path, "COSMOPOLITAN_INIT_ZIPOS="), obj);
+        kprintf("using path %s\n", path);
+      }
+      fexecve_impl_sysv_CLOSE:
+      close(shmfd);
+    }
+    if (!success) {
+      FormatInt32(stpcpy(path, "COSMOPOLITAN_INIT_ZIPOS="), fd);
+    }
     size_t numenvs;
     for (numenvs = 0; envp[numenvs];)
       ++numenvs;
